@@ -169,11 +169,12 @@
     if (enabled) {
       setText(label, db === null ? '+–' : `+${db.toFixed(1)}`);
       title = db === null
-        ? `Normalization off ${lufsText}`
-        : `Normalization off ${lufsText} : +${db.toFixed(1)} dB restored`;
+        ? `${lufsText} | Normalization Off`
+        : `${lufsText} | Normalization Off`;
+        // : `${lufsText} | Normalization off : +${db.toFixed(1)} dB`;
     } else {
-      setText(label, `+${db.toFixed(1)}`);
-      title = `Normalization Active ${lufsText}`;
+      setText(label, `-${db.toFixed(1)}`);
+      title = `${lufsText} | Normalization Active`;
     }
 
     setAttr(button, 'aria-pressed', String(enabled));
