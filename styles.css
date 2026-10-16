@@ -21,22 +21,31 @@
   /* text-decoration: line-through; */
 }
 
-/* Mini spectrum analyzer, right after play/pause */
+/* Spectrum analyzer, centred in the bottom control bar (spectrum.js sets left/width) */
+.ytp-chrome-controls {
+  position: relative;
+}
+
 .ytp-chrome-controls .yts-spectrum {
-  display: inline-flex;
-  align-items: center;
-  height: 100%;
-  padding: 0 6px;
-  vertical-align: top;
-  flex: none;
-  pointer-events: none; /* never steals clicks from the player */
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: 36px;
+  transform: translateY(-50%);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: crosshair;
+  z-index: 1;
 }
 
 .yts-spectrum canvas {
   display: block;
+  width: 100%;
+  height: 100%;
 }
 
-/* Too cramped in small/embedded players */
-.ytp-small-mode .yts-spectrum {
+/* Only while normalization is bypassed (+dB) */
+.yts-spectrum[hidden],
+html[data-ytnd="off"] .yts-spectrum {
   display: none;
 }

@@ -1,8 +1,10 @@
 /**
- * YouTube Studio – Mini Spectrum Analyzer
- * Log-frequency spectrum placed right after the play/pause button.
+ * YouTube Studio – Spectrum Analyzer
+ * Log-frequency spectrum centred in the player's bottom control bar.
+ * Visible only while normalization is bypassed (+dB mode in inject.js).
  *  - Averaging time: 1000 ms (power domain, like Voxengo SPAN "Avg Time")
- *  - Peak hold:      2000 ms, then the peak falls
+ *  - Peak hold:      2000 ms, then the peak line falls
+ *  - Hover:          level | frequency | note ± cents
  */
 (() => {
   'use strict';
@@ -11,48 +13,90 @@
   window.__ytsSpectrum = true;
 
   const CONFIG = Object.freeze({
-    width: 200, // CSS px
-    height: 30,
-    bars: 200,
+    height: 50, // CSS px (control bar is 48 px)
+    minWidth: 160, // hide when the free space is smaller than this
+    maxWidth: 560,
+    sidePadding: 12, // gap to left/right controls
     minHz: 20,
     maxHz: 20_000,
     minDb: -90,
-    maxDb: -10,
+    maxDb: -6,
     avgTimeMs: 100,
-    peakHoldMs: 500,
+    peakHoldMs: 1000,
     peakFallDbPerSec: 24,
     slopeDbPerOct: 4.5, // tilt around 1 kHz (0 = flat, 4.5 = SPAN default)
-    fftSize: 8192, // ~5.9 Hz/bin @ 48 kHz → usable low end
+    fftSize: 16384, // ~2.9 Hz/bin @ 48 kHz → detailed low end
     compensateVolume: true, // show source level regardless of the slider
+    // gridHz: [50,100,500,1000,1500,2000,2500,3000,3500,4000,4500,5000,10_000],
+    gridHz: [50,100,500,1000,5000,10_000],
   });
 
   const CLASS = 'yts-spectrum';
+  const FALLBACK_RATE = 48_000;
+  const LOG_RATIO = Math.log(CONFIG.maxHz / CONFIG.minHz);
+  const DB_RANGE = CONFIG.maxDb - CONFIG.minDb;
+  const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
-  // ---------- DSP helpers ----------
+  /** Set by inject.js; anything but "off" counts as bypass enabled. */
+  const isEnabled = () => document.documentElement.dataset.ytnd !== 'off';
 
+  // ---------- Helpers ----------
+
+  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
   const dbToPower = (db) => 10 ** (db / 10); // -Infinity → 0
+  const hzToX = (hz, width) => (width * Math.log(hz / CONFIG.minHz)) / LOG_RATIO;
+  const formatHz = (hz, digits) =>
+    hz >= 1000 ? `${(hz / 1000).toFixed(digits)}kHz` : `${hz.toFixed(digits)}Hz`;
 
-  /** Log-spaced bands mapped to FFT bins. */
-  const buildBands = (sampleRate) => {
+  const noteOf = (hz) => {
+    const midi = 69 + 12 * Math.log2(hz / 440);
+    const n = Math.round(midi);
+    const cents = Math.round((midi - n) * 100);
+    const name = `${NOTE_NAMES[((n % 12) + 12) % 12]}${Math.floor(n / 12) - 1}`;
+    return `${name} ${cents < 0 ? '−' : '+'} ${Math.abs(cents)} Cents`;
+  };
+
+  /** 256-step colour ramp: deep purple → magenta → red → orange. */
+  const PALETTE = (() => {
+    const stops = [
+      [0, [38, 6, 64]],
+      [0.35, [110, 24, 150]],
+      [0.6, [214, 30, 140]],
+      [0.82, [255, 45, 85]],
+      [1, [255, 110, 30]],
+    ];
+    return Array.from({ length: 256 }, (_, i) => {
+      const t = i / 255;
+      const j = stops.findIndex(([p]) => p >= t);
+      const [p1, c1] = stops[Math.max(j - 1, 0)];
+      const [p2, c2] = stops[j];
+      const u = p2 === p1 ? 0 : (t - p1) / (p2 - p1);
+      const [r, g, b] = c1.map((c, k) => Math.round(c + (c2[k] - c) * u));
+      return `rgb(${r} ${g} ${b})`;
+    });
+  })();
+
+  /** One log-spaced band per pixel column, mapped to FFT bins. */
+  const buildColumns = (width, sampleRate) => {
     const binHz = sampleRate / CONFIG.fftSize;
     const maxBin = CONFIG.fftSize / 2 - 1;
-    const ratio = CONFIG.maxHz / CONFIG.minHz;
 
-    return Array.from({ length: CONFIG.bars }, (_, i) => {
-      const f1 = CONFIG.minHz * ratio ** (i / CONFIG.bars);
-      const f2 = CONFIG.minHz * ratio ** ((i + 1) / CONFIG.bars);
-      const center = Math.sqrt(f1 * f2);
+    return Array.from({ length: width }, (_, x) => {
+      const f1 = CONFIG.minHz * Math.exp((LOG_RATIO * x) / width);
+      const f2 = CONFIG.minHz * Math.exp((LOG_RATIO * (x + 1)) / width);
+      const hz = Math.sqrt(f1 * f2);
       return {
+        hz,
         lo: Math.ceil(f1 / binHz),
         hi: Math.min(Math.floor(f2 / binHz), maxBin),
-        k: Math.min(center / binHz, maxBin - 1),
-        tiltDb: CONFIG.slopeDbPerOct * Math.log2(center / 1000),
+        k: Math.min(hz / binHz, maxBin - 1),
+        tiltDb: CONFIG.slopeDbPerOct * Math.log2(hz / 1000),
       };
     });
   };
 
-  /** Mean power of a band; interpolates when the band is narrower than one bin. */
-  const bandPower = (spectrum, { lo, hi, k }) => {
+  /** Mean power of a column; interpolates when it is narrower than one bin. */
+  const columnPower = (spectrum, { lo, hi, k }) => {
     if (hi >= lo) {
       let sum = 0;
       for (let b = lo; b <= hi; b++) sum += dbToPower(spectrum[b]);
@@ -69,8 +113,8 @@
   /** video → tap, or null if capture failed (don't retry). */
   const taps = new WeakMap();
 
-  // Creating a context without a user gesture leaves it suspended, and a
-  // captured <video> would then go silent. Wait for activation instead.
+  // A context created without a user gesture starts suspended, and a captured
+  // <video> would then go silent. Wait for activation instead.
   const hasActivation = () => navigator.userActivation?.hasBeenActive ?? true;
 
   const resumeContext = () => {
@@ -88,16 +132,12 @@
       const source = audioCtx.createMediaElementSource(video);
       const analyser = new AnalyserNode(audioCtx, {
         fftSize: CONFIG.fftSize,
-        smoothingTimeConstant: 0, // we average ourselves, time-based
+        smoothingTimeConstant: 0, // averaged ourselves, time-based
       });
       source.connect(audioCtx.destination); // keep the audio audible
       source.connect(analyser);
 
-      const tap = {
-        analyser,
-        spectrum: new Float32Array(analyser.frequencyBinCount),
-        bands: buildBands(audioCtx.sampleRate),
-      };
+      const tap = { analyser, spectrum: new Float32Array(analyser.frequencyBinCount) };
       taps.set(video, tap);
       return tap;
     } catch (error) {
@@ -108,92 +148,229 @@
     }
   };
 
-  // ---------- Per-view state ----------
+  // ---------- Views ----------
 
-  /** wrapper element → render state */
+  /** controls element → view */
   const views = new Map();
+  const resizeObserver = new ResizeObserver(() => schedule());
 
-  const createView = () => {
+  const createView = (controls, video) => {
     const wrapper = document.createElement('div');
     wrapper.className = CLASS;
-    wrapper.setAttribute('aria-hidden', 'true');
-
+    wrapper.hidden = true;
     const canvas = document.createElement('canvas');
-    canvas.style.width = `${CONFIG.width}px`;
-    canvas.style.height = `${CONFIG.height}px`;
     wrapper.append(canvas);
-    return wrapper;
-  };
+    controls.append(wrapper);
 
-  const createState = (wrapper, video) => {
-    const canvas = wrapper.firstElementChild;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(CONFIG.width * dpr);
-    canvas.height = Math.round(CONFIG.height * dpr);
-
-    const g = canvas.getContext('2d');
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    const n = CONFIG.bars;
-    return {
+    const view = {
+      controls,
+      wrapper,
+      canvas,
+      g: canvas.getContext('2d'),
       video,
-      g,
-      power: new Float64Array(n),
-      db: new Float32Array(n).fill(-Infinity),
-      peak: new Float32Array(n).fill(-Infinity),
-      peakAt: new Float64Array(n),
-      last: performance.now(),
+      width: 0,
+      dpr: 0,
+      hoverX: null,
     };
+
+    wrapper.addEventListener('pointermove', (event) => {
+      view.hoverX = event.offsetX;
+      startLoop();
+    });
+    wrapper.addEventListener('pointerleave', () => {
+      view.hoverX = null;
+      startLoop();
+    });
+
+    resizeObserver.observe(controls);
+    return view;
   };
+
+  /** Resets columns and averaging buffers. */
+  const rebuild = (view) => {
+    const n = view.width;
+    view.sampleRate = audioCtx?.sampleRate ?? FALLBACK_RATE;
+    view.columns = buildColumns(n, view.sampleRate);
+    view.power = new Float64Array(n);
+    view.db = new Float32Array(n).fill(-Infinity);
+    view.peak = new Float32Array(n).fill(-Infinity);
+    view.peakAt = new Float64Array(n);
+    view.last = performance.now();
+  };
+
+  const resize = (view, width) => {
+    const dpr = window.devicePixelRatio || 1;
+    view.width = width;
+    view.dpr = dpr;
+    view.wrapper.style.width = `${width}px`;
+    view.canvas.width = Math.round(width * dpr);
+    view.canvas.height = Math.round(CONFIG.height * dpr);
+    view.g.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const shade = view.g.createLinearGradient(0, 0, 0, CONFIG.height);
+    shade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    shade.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
+    view.shade = shade;
+
+    rebuild(view);
+  };
+
+  /** Outer edge of the visible children of a control group. */
+  const edgeOf = (group, side) => {
+    let edge = side === 'right' ? -Infinity : Infinity;
+    for (const child of group?.children ?? []) {
+      if (child.classList.contains(CLASS)) continue;
+      const rect = child.getBoundingClientRect();
+      if (!rect.width) continue;
+      edge = side === 'right' ? Math.max(edge, rect.right) : Math.min(edge, rect.left);
+    }
+    return edge;
+  };
+
+  /** Centres the view in the bar without overlapping the left/right controls. */
+  const layout = (view) => {
+    const bar = view.controls.getBoundingClientRect();
+    if (!bar.width) return;
+
+    const leftEdge = Math.max(edgeOf(view.controls.querySelector('.ytp-left-controls'), 'right') - bar.left, 0);
+    const rightEdge = Math.min(edgeOf(view.controls.querySelector('.ytp-right-controls'), 'left') - bar.left, bar.width);
+    const pad = CONFIG.sidePadding;
+    const width = Math.floor(Math.min(CONFIG.maxWidth, rightEdge - leftEdge - pad * 2));
+
+    if (width < CONFIG.minWidth) {
+      view.wrapper.hidden = true;
+      return;
+    }
+
+    const x = clamp((bar.width - width) / 2, leftEdge + pad, rightEdge - pad - width);
+    view.wrapper.hidden = false;
+    view.wrapper.style.left = `${Math.round(x)}px`;
+    if (width !== view.width || (window.devicePixelRatio || 1) !== view.dpr) resize(view, width);
+  };
+
+  // ---------- Analysis ----------
 
   /** Advances averaging + peak hold. Returns true while anything is visible. */
-  const update = (s, tap, now) => {
-    const dt = now - s.last;
-    s.last = now;
+  const update = (view, tap, now) => {
+    if (tap && view.sampleRate !== audioCtx.sampleRate) rebuild(view);
+
+    const dt = now - view.last;
+    view.last = now;
     const alpha = 1 - Math.exp(-dt / CONFIG.avgTimeMs);
 
-    const volume = s.video.volume;
+    const volume = view.video.volume;
     const offsetDb = CONFIG.compensateVolume && volume > 0 ? -20 * Math.log10(volume) : 0;
 
     if (tap) tap.analyser.getFloatFrequencyData(tap.spectrum);
 
-    let alive = !s.video.paused;
-    for (let i = 0; i < CONFIG.bars; i++) {
-      const p = tap ? bandPower(tap.spectrum, tap.bands[i]) : 0;
-      s.power[i] += (p - s.power[i]) * alpha;
+    const { columns, power, db, peak, peakAt } = view;
+    let alive = !view.video.paused;
 
-      const db = 10 * Math.log10(s.power[i]) + (tap?.bands[i].tiltDb ?? 0) + offsetDb;
-      s.db[i] = db;
+    for (let x = 0; x < view.width; x++) {
+      const column = columns[x];
+      const p = tap ? columnPower(tap.spectrum, column) : 0;
+      power[x] += (p - power[x]) * alpha;
 
-      if (db >= s.peak[i]) {
-        s.peak[i] = db;
-        s.peakAt[i] = now;
-      } else if (now - s.peakAt[i] > CONFIG.peakHoldMs) {
-        s.peak[i] = Math.max(db, s.peak[i] - (CONFIG.peakFallDbPerSec * dt) / 1000);
+      const level = 10 * Math.log10(power[x]) + column.tiltDb + offsetDb;
+      db[x] = level;
+
+      if (level >= peak[x]) {
+        peak[x] = level;
+        peakAt[x] = now;
+      } else if (now - peakAt[x] > CONFIG.peakHoldMs) {
+        peak[x] = Math.max(level, peak[x] - (CONFIG.peakFallDbPerSec * dt) / 1000);
       }
-      if (s.peak[i] > CONFIG.minDb) alive = true;
+      if (peak[x] > CONFIG.minDb) alive = true;
     }
     return alive;
   };
 
-  const draw = ({ g, db, peak }) => {
-    const { width: w, height: h, bars, minDb, maxDb } = CONFIG;
-    const step = w / bars;
-    const barW = Math.max(step - 1, 1);
-    const toY = (v) => h - Math.min(Math.max((v - minDb) / (maxDb - minDb), 0), 1) * h;
+  // ---------- Drawing ----------
 
+  const toY = (db) => CONFIG.height * (1 - clamp((db - CONFIG.minDb) / DB_RANGE, 0, 1));
+
+  const strokeCurve = (g, values, style) => {
+    g.beginPath();
+    let penDown = false;
+    for (let x = 0; x < values.length; x++) {
+      const v = values[x];
+      if (!(v > CONFIG.minDb)) {
+        penDown = false;
+        continue;
+      }
+      if (penDown) g.lineTo(x + 0.5, toY(v));
+      else g.moveTo(x + 0.5, toY(v));
+      penDown = true;
+    }
+    g.strokeStyle = style;
+    g.lineWidth = 1;
+    g.stroke();
+  };
+
+  const drawTooltip = (view) => {
+    const { g, width: w, db, columns } = view;
+    const x = Math.floor(view.hoverX);
+    if (x < 0 || x >= w) return;
+
+    const { hz } = columns[x];
+    const level = Number.isFinite(db[x]) ? `${db[x].toFixed(2)}dB` : '−∞dB';
+    const text = `${level} | ${formatHz(hz, 2)} | ${noteOf(hz)}`;
+
+    g.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    g.fillRect(x, 0, 1, CONFIG.height);
+
+    g.font = '10px Roboto, Arial, sans-serif';
+    g.textBaseline = 'middle';
+    const boxW = g.measureText(text).width + 8;
+    const preferred = x + 6 + boxW > w ? x - 6 - boxW : x + 6;
+    const bx = Math.max(2, Math.min(preferred, w - boxW - 2));
+
+    g.fillStyle = 'rgba(20, 20, 24, 0.85)';
+    g.fillRect(bx, 2, boxW, 14);
+    g.fillStyle = '#fff';
+    g.fillText(text, bx + 4, 9);
+  };
+
+  const draw = (view) => {
+    const { g, width: w, db, peak } = view;
+    const h = CONFIG.height;
+
+    g.globalCompositeOperation = 'source-over';
     g.clearRect(0, 0, w, h);
 
-    g.fillStyle = 'rgba(255, 255, 255, 0.85)';
-    for (let i = 0; i < bars; i++) {
-      const y = toY(db[i]);
-      if (y < h) g.fillRect(i * step, y, barW, h - y);
+    // Filled spectrum, coloured per column by level
+    for (let x = 0; x < w; x++) {
+      const t = (db[x] - CONFIG.minDb) / DB_RANGE;
+      if (!(t > 0)) continue;
+      const y = h * (1 - Math.min(t, 1));
+      g.fillStyle = PALETTE[Math.min(255, Math.round(t * 255))];
+      g.fillRect(x, y, 1, h - y);
     }
 
-    g.fillStyle = '#ff0033';
-    for (let i = 0; i < bars; i++) {
-      if (peak[i] > minDb) g.fillRect(i * step, toY(peak[i]), barW, 1.5);
+    // Darken towards the bottom, then put the background behind everything
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = view.shade;
+    g.fillRect(0, 0, w, h);
+    g.globalCompositeOperation = 'destination-over';
+    g.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    g.fillRect(0, 0, w, h);
+    g.globalCompositeOperation = 'source-over';
+
+    // Frequency grid
+    g.font = '9px Roboto, Arial, sans-serif';
+    g.textBaseline = 'top';
+    for (const hz of CONFIG.gridHz) {
+      const x = Math.round(hzToX(hz, w));
+      g.fillStyle = 'rgba(255, 255, 255, 0.14)';
+      g.fillRect(x, 0, 1, h);
+      g.fillStyle = 'rgba(255, 255, 255, 0.45)';
+      g.fillText(formatHz(hz, 0), x + 3, 2);
     }
+
+    strokeCurve(g, peak, 'rgba(214, 190, 255, 0.55)'); // peak hold
+    strokeCurve(g, db, 'rgba(255, 255, 255, 0.9)'); // averaged outline
+
+    if (view.hoverX !== null) drawTooltip(view);
   };
 
   // ---------- Render loop (runs only while something is visible) ----------
@@ -202,14 +379,20 @@
 
   const frame = (now) => {
     rafId = 0;
+    if (!isEnabled()) return;
+
     let alive = false;
-    for (const [wrapper, state] of views) {
-      if (!wrapper.isConnected) {
-        views.delete(wrapper);
+    for (const [controls, view] of views) {
+      if (!view.wrapper.isConnected) {
+        views.delete(controls);
+        resizeObserver.unobserve(controls);
         continue;
       }
-      if (update(state, taps.get(state.video) ?? null, now)) alive = true;
-      draw(state);
+      if (view.wrapper.hidden || !view.width) continue;
+
+      const active = update(view, taps.get(view.video) ?? null, now);
+      if (active || view.hoverX !== null) alive = true;
+      draw(view);
     }
     if (alive) startLoop();
   };
@@ -221,39 +404,51 @@
   // ---------- Mounting ----------
 
   const ensureViews = () => {
-    for (const player of document.querySelectorAll('.html5-video-player')) {
-      const left = player.querySelector('.ytp-left-controls');
-      const video = player.querySelector('video');
-      if (!left || !video) continue;
+    const enabled = isEnabled();
 
-      let wrapper = left.querySelector(`.${CLASS}`);
-      if (!wrapper) {
-        wrapper = createView();
-        const play = left.querySelector('.ytp-play-button');
-        if (play) play.after(wrapper);
-        else left.prepend(wrapper);
+    for (const player of document.querySelectorAll('.html5-video-player')) {
+      const controls = player.querySelector('.ytp-chrome-controls');
+      const video = player.querySelector('video');
+      if (!controls || !video) continue;
+
+      let view = views.get(controls);
+      if (!view?.wrapper.isConnected) {
+        view = createView(controls, video);
+        views.set(controls, view);
+      }
+      if (view.video !== video) {
+        view.video = video;
+        if (view.width) rebuild(view);
       }
 
-      if (views.get(wrapper)?.video !== video) views.set(wrapper, createState(wrapper, video));
+      if (!enabled) continue; // CSS hides it; skip layout and audio capture
+      layout(view);
       if (!video.paused) getTap(video);
     }
-    if (views.size) startLoop();
+
+    if (enabled && views.size) startLoop();
   };
 
   let scheduled = false;
-  const schedule = () => {
+  function schedule() {
     if (scheduled) return;
     scheduled = true;
     requestAnimationFrame(() => {
       scheduled = false;
       ensureViews();
     });
-  };
+  }
+
+  // Normalization toggled in inject.js → start fresh.
+  window.addEventListener('ytnd:change', () => {
+    for (const view of views.values()) if (view.width) rebuild(view);
+    schedule();
+  });
 
   // 'play' doesn't bubble → capture phase.
   document.addEventListener('play', schedule, true);
 
-  // First gesture: resume/create the AudioContext.
+  // First gesture: create/resume the AudioContext.
   for (const type of ['pointerdown', 'keydown']) {
     window.addEventListener(
       type,

@@ -52,6 +52,13 @@
 
   let enabled = loadEnabled();
 
+  /** Shares the on/off state with other scripts (spectrum.js) and CSS. */
+  const publishState = () => {
+    document.documentElement.dataset.ytnd = enabled ? 'on' : 'off';
+    window.dispatchEvent(new CustomEvent('ytnd:change', { detail: { enabled } }));
+  };
+  publishState();
+
   // ---------- Volume helpers ----------
 
   const getPlayer = (media) => media.closest?.('.html5-video-player') ?? null;
@@ -119,6 +126,7 @@
   const toggle = () => {
     enabled = !enabled;
     saveEnabled(enabled);
+    publishState();
 
     for (const media of document.querySelectorAll('.html5-video-player video')) {
       const target = enabled
@@ -173,7 +181,7 @@
         : `${lufsText} | Normalization Off`;
         // : `${lufsText} | Normalization off : +${db.toFixed(1)} dB`;
     } else {
-      setText(label, db === null ? '–' : `-${db.toFixed(1)}`);
+      setText(label, db === null ? '-–' : `-${db.toFixed(1)}`);
       title = `${lufsText} | Normalization Active`;
     }
 
