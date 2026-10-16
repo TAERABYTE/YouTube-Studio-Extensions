@@ -1,0 +1,22 @@
+/* Higher specificity than YouTube's fixed 48px .ytp-button width */
+.ytp-chrome-controls .ytp-button.ytnd-button {
+  width: auto !important;
+  min-width: 48px;
+  padding: 0 10px !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: top;
+  font-family: "YouTube Sans", Roboto, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums; /* digits keep the same width, so the button doesn't jitter */
+  color: #fff;
+  white-space: nowrap;
+}
+
+/* Off: normalization active → dimmed, struck-through "dB" */
+.ytnd-button[aria-pressed="false"] .ytnd-label {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
