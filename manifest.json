@@ -11,7 +11,7 @@
         "https://music.youtube.com/*",
         "https://www.youtube-nocookie.com/*"
       ],
-      "js": ["inject.js"],
+      "js": ["inject.js", "spectrum.js"],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": true

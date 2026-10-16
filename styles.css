@@ -20,3 +20,23 @@
   opacity: 0.40;
   /* text-decoration: line-through; */
 }
+
+/* Mini spectrum analyzer, right after play/pause */
+.ytp-chrome-controls .yts-spectrum {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 6px;
+  vertical-align: top;
+  flex: none;
+  pointer-events: none; /* never steals clicks from the player */
+}
+
+.yts-spectrum canvas {
+  display: block;
+}
+
+/* Too cramped in small/embedded players */
+.ytp-small-mode .yts-spectrum {
+  display: none;
+}
