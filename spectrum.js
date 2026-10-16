@@ -13,16 +13,16 @@
   window.__ytsSpectrum = true;
 
   const CONFIG = Object.freeze({
-    height: 50, // CSS px (control bar is 48 px)
+    height: 48, // CSS px (control bar is 48 px)
     minWidth: 160, // hide when the free space is smaller than this
-    maxWidth: 560,
+    maxWidth: 400,
     sidePadding: 12, // gap to left/right controls
     minHz: 20,
     maxHz: 20_000,
-    minDb: -90,
-    maxDb: -6,
-    avgTimeMs: 100,
-    peakHoldMs: 1000,
+    minDb: -100,
+    maxDb: -0,
+    avgTimeMs: 0,
+    peakHoldMs: 3000,
     peakFallDbPerSec: 24,
     slopeDbPerOct: 4.5, // tilt around 1 kHz (0 = flat, 4.5 = SPAN default)
     fftSize: 16384, // ~2.9 Hz/bin @ 48 kHz → detailed low end
