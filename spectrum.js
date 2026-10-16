@@ -15,24 +15,27 @@
   const CONFIG = Object.freeze({
     height: 48, // CSS px (control bar is 48 px)
     minWidth: 160, // hide when the free space is smaller than this
-    maxWidth: 400,
-    sidePadding: 12, // gap to left/right controls
-    minHz: 20,
-    maxHz: 20_000,
+    maxWidth: 450,
+    sidePadding: 4, // gap to left/right controls
+    minHz: 1,
+    maxHz: 24_000,
     minDb: -100,
     maxDb: -0,
-    avgTimeMs: 0,
-    peakHoldMs: 3000,
+    avgTimeMs: 50,
+    peakHoldMs: 4000,
     peakFallDbPerSec: 24,
-    slopeDbPerOct: 4.5, // tilt around 1 kHz (0 = flat, 4.5 = SPAN default)
-    fftSize: 16384, // ~2.9 Hz/bin @ 48 kHz → detailed low end
+    slopeDbPerOct: 0, // tilt around 1 kHz (0 = flat, 4.5 = SPAN default)
+    // fftSize: 4096,  // ~2.9 Hz/bin @ 48 kHz → detailed low end
+    fftSize: 16384,
     compensateVolume: true, // show source level regardless of the slider
     // gridHz: [50,100,500,1000,1500,2000,2500,3000,3500,4000,4500,5000,10_000],
-    gridHz: [50,100,500,1000,5000,10_000],
+    gridHz: [20,50,100,500,1000,3000,5000,10_000,20_000],
   });
 
   const CLASS = 'yts-spectrum';
   const FALLBACK_RATE = 48_000;
+  // const LOG_RATIO = Math.log(CONFIG.maxHz / CONFIG.minHz);
+  const POWER = 2.0; // ยิ่งมาก ยิ่งบีบช่วงความถี่ต่ำ
   const LOG_RATIO = Math.log(CONFIG.maxHz / CONFIG.minHz);
   const DB_RANGE = CONFIG.maxDb - CONFIG.minDb;
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -44,7 +47,11 @@
 
   const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
   const dbToPower = (db) => 10 ** (db / 10); // -Infinity → 0
-  const hzToX = (hz, width) => (width * Math.log(hz / CONFIG.minHz)) / LOG_RATIO;
+  // const hzToX = (hz, width) => (width * Math.log(hz / CONFIG.minHz)) / LOG_RATIO;
+  const hzToX = (hz, width) => {
+  const t = Math.log(hz / CONFIG.minHz) / LOG_RATIO;
+    return width * Math.pow(t, POWER);
+  };
   const formatHz = (hz, digits) =>
     hz >= 1000 ? `${(hz / 1000).toFixed(digits)}kHz` : `${hz.toFixed(digits)}Hz`;
 
@@ -82,8 +89,11 @@
     const maxBin = CONFIG.fftSize / 2 - 1;
 
     return Array.from({ length: width }, (_, x) => {
-      const f1 = CONFIG.minHz * Math.exp((LOG_RATIO * x) / width);
-      const f2 = CONFIG.minHz * Math.exp((LOG_RATIO * (x + 1)) / width);
+      const t1 = Math.pow(x / width, 1 / POWER);
+      const t2 = Math.pow((x + 1) / width, 1 / POWER);
+
+      const f1 = CONFIG.minHz * Math.exp(LOG_RATIO * t1);
+      const f2 = CONFIG.minHz * Math.exp(LOG_RATIO * t2);
       const hz = Math.sqrt(f1 * f2);
       return {
         hz,
