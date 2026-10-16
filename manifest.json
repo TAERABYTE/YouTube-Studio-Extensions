@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Studio",
+  "version": "1.0.0",
+  "description": "YouTube Studio : tool for music producer",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://m.youtube.com/*",
+        "https://music.youtube.com/*",
+        "https://www.youtube-nocookie.com/*"
+      ],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://m.youtube.com/*",
+        "https://music.youtube.com/*",
+        "https://www.youtube-nocookie.com/*"
+      ],
+      "css": ["styles.css"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "yt-normalizer-disabler@local",
+      "strict_min_version": "128.0"
+    }
+  },
+  "icons": {
+  "128": "YT.png"
+  },
+  "action": {
+    "default_title": "YouTube",
+    "default_icon": "YT.png"
+  }
+}
