@@ -173,7 +173,7 @@
         : `${lufsText} | Normalization Off`;
         // : `${lufsText} | Normalization off : +${db.toFixed(1)} dB`;
     } else {
-      setText(label, `-${db.toFixed(1)}`);
+      setText(label, db === null ? '–' : `-${db.toFixed(1)}`);
       title = `${lufsText} | Normalization Active`;
     }
 
