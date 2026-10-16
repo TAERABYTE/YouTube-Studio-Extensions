@@ -172,7 +172,7 @@
         ? `Normalization off ${lufsText}`
         : `Normalization off ${lufsText} : +${db.toFixed(1)} dB restored`;
     } else {
-      setText(label, 'dB');
+      setText(label, `+${db.toFixed(1)}`);
       title = `Normalization Active ${lufsText}`;
     }
 

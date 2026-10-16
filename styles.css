@@ -17,6 +17,6 @@
 
 /* Off: normalization active → dimmed, struck-through "dB" */
 .ytnd-button[aria-pressed="false"] .ytnd-label {
-  opacity: 0.55;
-  text-decoration: line-through;
+  opacity: 0.40;
+  /* text-decoration: line-through; */
 }
