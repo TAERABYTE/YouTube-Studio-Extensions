@@ -45,6 +45,7 @@
   },
   "action": {
     "default_title": "YouTube",
-    "default_icon": "YT.png"
+    "default_icon": "YT.png",
+    "default_popup": "settings.html"
   }
 }
