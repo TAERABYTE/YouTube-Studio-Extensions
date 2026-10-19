@@ -264,7 +264,7 @@
   const update = (view, tap, now) => {
     if (tap && view.sampleRate !== audioCtx.sampleRate) rebuild(view);
 
-    const dt = now - view.last;
+    const dt = clamp(now - view.last, 0, 1000);
     view.last = now;
     const alpha = 1 - Math.exp(-dt / CONFIG.avgTimeMs);
 
@@ -280,6 +280,7 @@
       const column = columns[x];
       const p = tap ? columnPower(tap.spectrum, column) : 0;
       power[x] += (p - power[x]) * alpha;
+      if (!(power[x] >= 0)) power[x] = 0;
 
       const level = 10 * Math.log10(power[x]) + column.tiltDb + offsetDb;
       db[x] = level;
@@ -457,6 +458,19 @@
 
   // 'play' doesn't bubble → capture phase.
   document.addEventListener('play', schedule, true);
+
+  // New clip/song: YouTube reuses the same <video>, so watch for a new source instead.
+  // 'loadstart' doesn't bubble → capture phase.
+  document.addEventListener(
+    'loadstart',
+    (event) => {
+      for (const view of views.values()) {
+        if (view.video === event.target && view.width) rebuild(view);
+      }
+      startLoop(); // draw one frame so the old graph is cleared even while paused
+    },
+    true,
+  );
 
   // First gesture: create/resume the AudioContext.
   for (const type of ['pointerdown', 'keydown']) {
