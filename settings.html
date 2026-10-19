@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YouTube Studio settings</title>
+    <link rel="stylesheet" href="settings.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="head">
+        <div class="title-row">
+          <h1>Spectrum analyzer</h1>
+          <output id="status" class="status" role="status"></output>
+        </div>
+        <canvas id="preview" class="preview" role="img" aria-label="Preview of the analyzer with a simulated mix"></canvas>
+        <p class="caption">Preview with a simulated mix. Changes apply to open YouTube tabs right away.</p>
+      </header>
+
+      <section class="group" aria-labelledby="analyzer-title">
+        <h2 id="analyzer-title">Analyzer</h2>
+        <div id="section-analyzer" class="fields"></div>
+      </section>
+
+      <details class="group advanced">
+        <summary><h2>Advanced</h2></summary>
+        <p class="note">Layout values depend on YouTube’s player. Extreme values can hide the graph or crowd the player buttons.</p>
+        <div id="section-advanced" class="fields"></div>
+      </details>
+
+      <footer class="foot">
+        <button id="reset" type="button" class="button">Reset to defaults</button>
+      </footer>
+    </main>
+
+    <script src="settings-schema.js"></script>
+    <script src="settings.js"></script>
+  </body>
+</html>

@@ -2,9 +2,10 @@
  * YouTube Studio – Spectrum Analyzer
  * Log-frequency spectrum centred in the player's bottom control bar.
  * Visible only while normalization is bypassed (+dB mode in inject.js).
- *  - Averaging time: 1000 ms (power domain, like Voxengo SPAN "Avg Time")
- *  - Peak hold:      2000 ms, then the peak line falls
- *  - Hover:          level | frequency | note ± cents
+ *  - Averaging:  time-based, power domain (like Voxengo SPAN "Avg Time")
+ *  - Peak hold:  then the peak line falls
+ *  - Hover:      level | frequency | note ± cents
+ * All tunable values come from the options page (settings-schema.js + bridge.js).
  */
 (() => {
   'use strict';
@@ -12,48 +13,28 @@
   if (window.__ytsSpectrum) return; // guard against double injection
   window.__ytsSpectrum = true;
 
-  const CONFIG = Object.freeze({
-    height: 48, // CSS px (control bar is 48 px)
-    minWidth: 160, // hide when the free space is smaller than this
-    maxWidth: 450,
-    sidePadding: 4, // gap to left/right controls
-    minHz: 1,
-    maxHz: 24_000,
-    minDb: -100,
-    maxDb: -0,
-    avgTimeMs: 50,
-    peakHoldMs: 4000,
-    peakFallDbPerSec: 24,
-    slopeDbPerOct: 0, // tilt around 1 kHz (0 = flat, 4.5 = SPAN default)
-    // fftSize: 4096,  // ~2.9 Hz/bin @ 48 kHz → detailed low end
-    fftSize: 16384,
-    compensateVolume: true, // show source level regardless of the slider
-    // gridHz: [50,100,500,1000,1500,2000,2500,3000,3500,4000,4500,5000,10_000],
-    gridHz: [20,50,100,500,1000,3000,5000,10_000,20_000],
-  });
+  const settings = window.__ytsSettings;
+  if (!settings) {
+    console.warn('[YouTube Studio] settings-schema.js must load before spectrum.js');
+    return;
+  }
+  const { DEFAULTS, EVENTS, PALETTE, clamp, formatHz, sanitize, createAxis } = settings;
 
   const CLASS = 'yts-spectrum';
   const FALLBACK_RATE = 48_000;
-  // const LOG_RATIO = Math.log(CONFIG.maxHz / CONFIG.minHz);
-  const POWER = 2.0; // ยิ่งมาก ยิ่งบีบช่วงความถี่ต่ำ
-  const LOG_RATIO = Math.log(CONFIG.maxHz / CONFIG.minHz);
-  const DB_RANGE = CONFIG.maxDb - CONFIG.minDb;
   const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+  /** Live settings. Replaced as a whole (never mutated) when the options page saves. */
+  let config = DEFAULTS;
+  let axis = createAxis(config);
+  let dbRange = config.maxDb - config.minDb;
 
   /** Set by inject.js; anything but "off" counts as bypass enabled. */
   const isEnabled = () => document.documentElement.dataset.ytnd !== 'off';
 
   // ---------- Helpers ----------
 
-  const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
   const dbToPower = (db) => 10 ** (db / 10); // -Infinity → 0
-  // const hzToX = (hz, width) => (width * Math.log(hz / CONFIG.minHz)) / LOG_RATIO;
-  const hzToX = (hz, width) => {
-  const t = Math.log(hz / CONFIG.minHz) / LOG_RATIO;
-    return width * Math.pow(t, POWER);
-  };
-  const formatHz = (hz, digits) =>
-    hz >= 1000 ? `${(hz / 1000).toFixed(digits)}kHz` : `${hz.toFixed(digits)}Hz`;
 
   const noteOf = (hz) => {
     const midi = 69 + 12 * Math.log2(hz / 440);
@@ -63,44 +44,21 @@
     return `${name} ${cents < 0 ? '−' : '+'} ${Math.abs(cents)} Cents`;
   };
 
-  /** 256-step colour ramp: deep purple → magenta → red → orange. */
-  const PALETTE = (() => {
-    const stops = [
-      [0, [38, 6, 64]],
-      [0.35, [110, 24, 150]],
-      [0.6, [214, 30, 140]],
-      [0.82, [255, 45, 85]],
-      [1, [255, 110, 30]],
-    ];
-    return Array.from({ length: 256 }, (_, i) => {
-      const t = i / 255;
-      const j = stops.findIndex(([p]) => p >= t);
-      const [p1, c1] = stops[Math.max(j - 1, 0)];
-      const [p2, c2] = stops[j];
-      const u = p2 === p1 ? 0 : (t - p1) / (p2 - p1);
-      const [r, g, b] = c1.map((c, k) => Math.round(c + (c2[k] - c) * u));
-      return `rgb(${r} ${g} ${b})`;
-    });
-  })();
-
-  /** One log-spaced band per pixel column, mapped to FFT bins. */
+  /** One band per pixel column (spaced by the frequency axis), mapped to FFT bins. */
   const buildColumns = (width, sampleRate) => {
-    const binHz = sampleRate / CONFIG.fftSize;
-    const maxBin = CONFIG.fftSize / 2 - 1;
+    const binHz = sampleRate / config.fftSize;
+    const maxBin = config.fftSize / 2 - 1;
 
     return Array.from({ length: width }, (_, x) => {
-      const t1 = Math.pow(x / width, 1 / POWER);
-      const t2 = Math.pow((x + 1) / width, 1 / POWER);
-
-      const f1 = CONFIG.minHz * Math.exp(LOG_RATIO * t1);
-      const f2 = CONFIG.minHz * Math.exp(LOG_RATIO * t2);
+      const f1 = axis.xToHz(x, width);
+      const f2 = axis.xToHz(x + 1, width);
       const hz = Math.sqrt(f1 * f2);
       return {
         hz,
         lo: Math.ceil(f1 / binHz),
         hi: Math.min(Math.floor(f2 / binHz), maxBin),
         k: Math.min(hz / binHz, maxBin - 1),
-        tiltDb: CONFIG.slopeDbPerOct * Math.log2(hz / 1000),
+        tiltDb: config.slopeDbPerOct * Math.log2(hz / 1000),
       };
     });
   };
@@ -141,7 +99,7 @@
     try {
       const source = audioCtx.createMediaElementSource(video);
       const analyser = new AnalyserNode(audioCtx, {
-        fftSize: CONFIG.fftSize,
+        fftSize: config.fftSize,
         smoothingTimeConstant: 0, // averaged ourselves, time-based
       });
       source.connect(audioCtx.destination); // keep the audio audible
@@ -156,6 +114,13 @@
       taps.set(video, null);
       return null;
     }
+  };
+
+  /** Applies a changed FFT size to an existing analyser. */
+  const syncTap = (tap) => {
+    if (tap.analyser.fftSize === config.fftSize) return;
+    tap.analyser.fftSize = config.fftSize;
+    tap.spectrum = new Float32Array(tap.analyser.frequencyBinCount);
   };
 
   // ---------- Views ----------
@@ -200,6 +165,7 @@
   const rebuild = (view) => {
     const n = view.width;
     view.sampleRate = audioCtx?.sampleRate ?? FALLBACK_RATE;
+    view.fftSize = config.fftSize;
     view.columns = buildColumns(n, view.sampleRate);
     view.power = new Float64Array(n);
     view.db = new Float32Array(n).fill(-Infinity);
@@ -210,14 +176,16 @@
 
   const resize = (view, width) => {
     const dpr = window.devicePixelRatio || 1;
+    const height = config.height;
     view.width = width;
     view.dpr = dpr;
     view.wrapper.style.width = `${width}px`;
+    view.wrapper.style.height = `${height}px`;
     view.canvas.width = Math.round(width * dpr);
-    view.canvas.height = Math.round(CONFIG.height * dpr);
+    view.canvas.height = Math.round(height * dpr);
     view.g.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const shade = view.g.createLinearGradient(0, 0, 0, CONFIG.height);
+    const shade = view.g.createLinearGradient(0, 0, 0, height);
     shade.addColorStop(0, 'rgba(0, 0, 0, 0)');
     shade.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
     view.shade = shade;
@@ -244,10 +212,10 @@
 
     const leftEdge = Math.max(edgeOf(view.controls.querySelector('.ytp-left-controls'), 'right') - bar.left, 0);
     const rightEdge = Math.min(edgeOf(view.controls.querySelector('.ytp-right-controls'), 'left') - bar.left, bar.width);
-    const pad = CONFIG.sidePadding;
-    const width = Math.floor(Math.min(CONFIG.maxWidth, rightEdge - leftEdge - pad * 2));
+    const pad = config.sidePadding;
+    const width = Math.floor(Math.min(config.maxWidth, rightEdge - leftEdge - pad * 2));
 
-    if (width < CONFIG.minWidth) {
+    if (width < config.minWidth) {
       view.wrapper.hidden = true;
       return;
     }
@@ -262,14 +230,17 @@
 
   /** Advances averaging + peak hold. Returns true while anything is visible. */
   const update = (view, tap, now) => {
-    if (tap && view.sampleRate !== audioCtx.sampleRate) rebuild(view);
+    if (tap) syncTap(tap);
+    if (tap && (view.sampleRate !== audioCtx.sampleRate || view.fftSize !== config.fftSize)) rebuild(view);
 
+    // rAF's timestamp is the frame start and can be earlier than the
+    // performance.now() stored by rebuild() → negative dt → NaN. Clamp it.
     const dt = clamp(now - view.last, 0, 1000);
     view.last = now;
-    const alpha = 1 - Math.exp(-dt / CONFIG.avgTimeMs);
+    const alpha = 1 - Math.exp(-dt / config.avgTimeMs);
 
     const volume = view.video.volume;
-    const offsetDb = CONFIG.compensateVolume && volume > 0 ? -20 * Math.log10(volume) : 0;
+    const offsetDb = config.compensateVolume && volume > 0 ? -20 * Math.log10(volume) : 0;
 
     if (tap) tap.analyser.getFloatFrequencyData(tap.spectrum);
 
@@ -280,7 +251,7 @@
       const column = columns[x];
       const p = tap ? columnPower(tap.spectrum, column) : 0;
       power[x] += (p - power[x]) * alpha;
-      if (!(power[x] >= 0)) power[x] = 0;
+      if (!(power[x] >= 0)) power[x] = 0; // never let NaN/negative values persist
 
       const level = 10 * Math.log10(power[x]) + column.tiltDb + offsetDb;
       db[x] = level;
@@ -288,24 +259,24 @@
       if (level >= peak[x]) {
         peak[x] = level;
         peakAt[x] = now;
-      } else if (now - peakAt[x] > CONFIG.peakHoldMs) {
-        peak[x] = Math.max(level, peak[x] - (CONFIG.peakFallDbPerSec * dt) / 1000);
+      } else if (now - peakAt[x] > config.peakHoldMs) {
+        peak[x] = Math.max(level, peak[x] - (config.peakFallDbPerSec * dt) / 1000);
       }
-      if (peak[x] > CONFIG.minDb) alive = true;
+      if (peak[x] > config.minDb) alive = true;
     }
     return alive;
   };
 
   // ---------- Drawing ----------
 
-  const toY = (db) => CONFIG.height * (1 - clamp((db - CONFIG.minDb) / DB_RANGE, 0, 1));
+  const toY = (db) => config.height * (1 - clamp((db - config.minDb) / dbRange, 0, 1));
 
   const strokeCurve = (g, values, style) => {
     g.beginPath();
     let penDown = false;
     for (let x = 0; x < values.length; x++) {
       const v = values[x];
-      if (!(v > CONFIG.minDb)) {
+      if (!(v > config.minDb)) {
         penDown = false;
         continue;
       }
@@ -320,6 +291,7 @@
 
   const drawTooltip = (view) => {
     const { g, width: w, db, columns } = view;
+    const h = config.height;
     const x = Math.floor(view.hoverX);
     if (x < 0 || x >= w) return;
 
@@ -328,7 +300,7 @@
     const text = `${level} | ${formatHz(hz, 2)} | ${noteOf(hz)}`;
 
     g.fillStyle = 'rgba(255, 255, 255, 0.6)';
-    g.fillRect(x, 0, 1, CONFIG.height);
+    g.fillRect(x, 0, 1, h);
 
     g.font = '10px Roboto, Arial, sans-serif';
     g.textBaseline = 'middle';
@@ -344,14 +316,14 @@
 
   const draw = (view) => {
     const { g, width: w, db, peak } = view;
-    const h = CONFIG.height;
+    const h = config.height;
 
     g.globalCompositeOperation = 'source-over';
     g.clearRect(0, 0, w, h);
 
     // Filled spectrum, coloured per column by level
     for (let x = 0; x < w; x++) {
-      const t = (db[x] - CONFIG.minDb) / DB_RANGE;
+      const t = (db[x] - config.minDb) / dbRange;
       if (!(t > 0)) continue;
       const y = h * (1 - Math.min(t, 1));
       g.fillStyle = PALETTE[Math.min(255, Math.round(t * 255))];
@@ -370,12 +342,14 @@
     // Frequency grid
     g.font = '9px Roboto, Arial, sans-serif';
     g.textBaseline = 'top';
-    for (const hz of CONFIG.gridHz) {
-      const x = Math.round(hzToX(hz, w));
+    for (const hz of config.gridHz) {
+      const x = Math.round(axis.hzToX(hz, w));
       g.fillStyle = 'rgba(255, 255, 255, 0.14)';
       g.fillRect(x, 0, 1, h);
+      const label = formatHz(hz, 0);
+      const labelW = g.measureText(label).width;
       g.fillStyle = 'rgba(255, 255, 255, 0.45)';
-      g.fillText(formatHz(hz, 0), x + 3, 2);
+      g.fillText(label, x + 3 + labelW > w ? x - 3 - labelW : x + 3, 2); // flip at the right edge
     }
 
     strokeCurve(g, peak, 'rgba(214, 190, 255, 0.55)'); // peak hold
@@ -450,6 +424,27 @@
     });
   }
 
+  // ---------- Settings ----------
+
+  const applySettings = (raw) => {
+    config = sanitize(raw);
+    axis = createAxis(config);
+    dbRange = config.maxDb - config.minDb;
+    for (const view of views.values()) view.dpr = 0; // forces resize() + rebuild() on next layout
+    schedule();
+  };
+
+  window.addEventListener(EVENTS.apply, (event) => {
+    if (typeof event.detail !== 'string') return;
+    try {
+      applySettings(JSON.parse(event.detail));
+    } catch {
+      /* malformed payload: keep current settings */
+    }
+  });
+
+  // ---------- Events ----------
+
   // Normalization toggled in inject.js → start fresh.
   window.addEventListener('ytnd:change', () => {
     for (const view of views.values()) if (view.width) rebuild(view);
@@ -460,7 +455,6 @@
   document.addEventListener('play', schedule, true);
 
   // New clip/song: YouTube reuses the same <video>, so watch for a new source instead.
-  // 'loadstart' doesn't bubble → capture phase.
   document.addEventListener(
     'loadstart',
     (event) => {
@@ -489,4 +483,7 @@
     childList: true,
     subtree: true,
   });
+
+  // Ask bridge.js for the saved settings (it may have sent them before we listened).
+  window.dispatchEvent(new CustomEvent(EVENTS.request));
 })();

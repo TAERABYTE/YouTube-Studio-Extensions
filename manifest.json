@@ -3,6 +3,11 @@
   "name": "YouTube Studio",
   "version": "1.0.0",
   "description": "YouTube Studio : tool for music producer",
+  "permissions": ["storage"],
+  "options_ui": {
+    "page": "settings.html",
+    "open_in_tab": false
+  },
   "content_scripts": [
     {
       "matches": [
@@ -11,7 +16,7 @@
         "https://music.youtube.com/*",
         "https://www.youtube-nocookie.com/*"
       ],
-      "js": ["inject.js", "spectrum.js"],
+      "js": ["settings-schema.js", "inject.js", "spectrum.js"],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": true
@@ -23,6 +28,7 @@
         "https://music.youtube.com/*",
         "https://www.youtube-nocookie.com/*"
       ],
+      "js": ["bridge.js"],
       "css": ["styles.css"],
       "run_at": "document_start",
       "all_frames": true
@@ -35,7 +41,7 @@
     }
   },
   "icons": {
-  "128": "YT.png"
+    "128": "YT.png"
   },
   "action": {
     "default_title": "YouTube",

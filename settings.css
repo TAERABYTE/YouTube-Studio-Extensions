@@ -1,0 +1,272 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fdfcff;
+  --surface: #f3eff8;
+  --text: #1e1828;
+  --muted: #655b72;
+  --line: #e4dded;
+  --accent: #a8136f;
+  --accent-soft: rgb(168 19 111 / 0.1);
+  --scope: #150f1c; /* preview background: mirrors the dark player bar */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1f1b25;
+    --surface: #2a2531;
+    --text: #f1ecf7;
+    --muted: #a99fb5;
+    --line: #3a3344;
+    --accent: #ff5fa2;
+    --accent-soft: rgb(255 95 162 / 0.14);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 520px;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.page {
+  max-width: 640px;
+  padding: 20px 24px 24px;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 16px;
+}
+
+h2 {
+  font-size: 14px;
+}
+
+/* ---------- Header + preview ---------- */
+
+.title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.status {
+  color: var(--muted);
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.status.is-visible {
+  opacity: 1;
+}
+
+.status.is-error {
+  color: #d93025;
+}
+
+.preview {
+  display: block;
+  width: 100%;
+  height: 104px;
+  border-radius: 8px;
+  background: var(--scope);
+}
+
+.caption {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---------- Groups ---------- */
+
+.group {
+  margin-top: 24px;
+}
+
+.group > h2,
+.advanced > summary {
+  padding-bottom: 4px;
+}
+
+.advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced > summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+
+.advanced[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.note {
+  margin: 4px 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---------- Fields ---------- */
+
+.field {
+  display: grid;
+  grid-template-columns: minmax(160px, 210px) 1fr;
+  gap: 4px 20px;
+  align-items: start;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.field label {
+  font-weight: 500;
+}
+
+.hint {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 36ch;
+}
+
+.field-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  min-height: 28px;
+}
+
+.slider {
+  flex: 1 1 140px;
+  min-width: 120px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.input {
+  width: 84px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  text-align: right;
+}
+
+.input-wide {
+  flex: 1 1 auto;
+  width: auto;
+  text-align: left;
+}
+
+select.input {
+  width: auto;
+  text-align: left;
+}
+
+.unit {
+  min-width: 3.6em;
+  color: var(--muted);
+}
+
+.presets {
+  display: flex;
+  gap: 6px;
+  flex-basis: 100%;
+}
+
+.chip {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.toggle {
+  width: 16px;
+  height: 16px;
+  margin: 6px 0;
+  accent-color: var(--accent);
+}
+
+/* ---------- Footer ---------- */
+
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.button:hover,
+.chip:hover {
+  border-color: var(--muted);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
+}
